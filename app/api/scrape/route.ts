@@ -10,48 +10,10 @@ import {
   saveProperties,
   getScrapingJob,
 } from '@/app/utils/db-operations';
+import { scrapePropertiesFromUrl, scrapePropertyDetail, extractPropertyUrls } from '@/lib/scraping';
 
-// 検索結果ページから物件URLリストを抽出
-function extractPropertyUrls(html: string): string[] {
-  const $ = cheerio.load(html);
-  const urls: string[] = [];
-
-  const cassetteItems = $('.cassetteitem');
-  console.log(`  .cassetteitemの数: ${cassetteItems.length}`);
-
-  cassetteItems.each((index, element) => {
-    const $el = $(element);
-    let found = false;
-    
-    // /chintai/jnc_または/chintai/jc_で始まるリンクを探す
-    $el.find('a[href*="/chintai/"]').each((i, linkEl) => {
-      const href = $(linkEl).attr('href') || '';
-      if (href && href !== 'javascript:void(0)' && /\/chintai\/(jnc|jc)_\d+/.test(href)) {
-        const url = href.startsWith('http')
-          ? href
-          : href.startsWith('/')
-          ? `https://suumo.jp${href}`
-          : '';
-        
-        if (url && !urls.includes(url)) {
-          urls.push(url);
-          found = true;
-        }
-        return false; // break
-      }
-    });
-
-    if (!found) {
-      console.log(`  .cassetteitem[${index + 1}]からURLを抽出できませんでした`);
-    }
-  });
-
-  console.log(`  抽出されたURL数: ${urls.length}件`);
-  return urls;
-}
-
-// 物件詳細ページから情報を抽出
-async function scrapePropertyDetail(page: any, propertyUrl: string): Promise<Property | null> {
+// 以下の関数は共通モジュール lib/scraping.ts に移動しました
+// 互換性のため、extractProperties関数のみ残します
   try {
     await page.goto(propertyUrl, {
       waitUntil: 'domcontentloaded',
@@ -510,13 +472,28 @@ function extractProperties(html: string, baseUrl: string): Property[] {
 export async function POST(request: NextRequest) {
   console.log('API Route: リクエスト受信');
   
+  // 環境変数でスクレイピング実行を制御
+  const SCRAPING_EXECUTOR = process.env.SCRAPING_EXECUTOR || 'local'; // 'local' | 'github-actions'
+  
+  // GitHub Actionsで実行する設定の場合、定期実行は拒否
+  const body = await request.json().catch(() => ({}));
+  const executionType: 'manual' | 'scheduled' = body.executionType || 'manual';
+  
+  if (SCRAPING_EXECUTOR === 'github-actions' && executionType === 'scheduled') {
+    return NextResponse.json(
+      {
+        success: false,
+        error: '定期実行のスクレイピングはGitHub Actionsで実行されます。Vercel環境では手動実行のみ利用可能です。',
+      },
+      { status: 503 }
+    );
+  }
+  
   let executionId: string | null = null; // エラーハンドリング用にスコープ外で定義
   
   try {
-    const body = await request.json();
     const searchUrl = body.url;
     const jobId = body.jobId as string | undefined; // ジョブID（定期実行の場合）
-    const executionType: 'manual' | 'scheduled' = body.executionType || 'manual';
     
     if (!searchUrl || typeof searchUrl !== 'string') {
       return NextResponse.json(
@@ -596,115 +573,9 @@ export async function POST(request: NextRequest) {
         throw new Error(`ページが見つかりません（HTTP ${status}）: ${searchUrl}`);
       }
       
-      console.log('ページ読み込み完了');
-
-      // 物件リストが表示されるまで待機（.cassetteitemまたは物件リンクが表示されるまで）
-      try {
-        await page.waitForSelector('.cassetteitem, .property, a[href*="/chintai/jnc"]', { 
-          timeout: 15000 
-        });
-        console.log('物件リストの表示を確認');
-      } catch (error) {
-        console.warn('物件リストのセレクタが見つかりませんでした。続行します。');
-      }
-
-      // 追加の待機時間（JavaScriptの実行を確実に待つ）
-      // networkidleの代わりに、少し長めに待機
-      await page.waitForTimeout(5000);
-
-      console.log('HTMLを取得中...');
-      // HTMLを取得
-      const html = await page.content();
-      console.log('HTML取得完了、サイズ:', html.length);
-      
-      // エラーページかどうかをより正確に判定
-      // タイトルタグを確認
-      const title = await page.title();
-      console.log('ページタイトル:', title);
-      
-      // タイトルにエラーが含まれているか確認
-      const hasErrorTitle = title.includes('見つかりません') || title.includes('404') || title.includes('Not Found');
-      
-      // HTMLに物件リストの要素が含まれているか確認（cheerioで確認する前）
-      const hasPropertyList = html.includes('cassetteitem') || html.includes('property') || html.includes('物件情報');
-      
-      console.log('エラータイトル:', hasErrorTitle, '物件リスト存在:', hasPropertyList);
-      
-      // エラータイトルがあり、かつ物件リストが存在しない場合のみエラーとする
-      // HTMLに「見つかりません」が含まれていても、物件リストがあれば正常なページとみなす
-      if (hasErrorTitle && !hasPropertyList) {
-        throw new Error('アクセスしようとしたページが見つかりません。URLが正しくない可能性があります。');
-      }
-      
       console.log('物件情報を抽出中...');
-      // 検索結果ページから物件URLリストを抽出
-      const propertyUrls = extractPropertyUrls(html);
-      console.log(`抽出された物件URL数: ${propertyUrls.length}件`);
-
-      // 最大抽出件数を50件に制限
-      const urlsToScrape = propertyUrls.slice(0, 50);
-      console.log(`最大件数制限により${urlsToScrape.length}件に制限しました（リクエスト: 最大50件）`);
-
-      // 10件ずつのバッチに分割して並列処理
-      const BATCH_SIZE = 10;
-      const properties: Property[] = [];
-      
-      // URLリストを10件ずつのバッチに分割
-      const batches: string[][] = [];
-      for (let i = 0; i < urlsToScrape.length; i += BATCH_SIZE) {
-        batches.push(urlsToScrape.slice(i, i + BATCH_SIZE));
-      }
-      
-      console.log(`${batches.length}個のバッチに分割しました（各バッチ最大${BATCH_SIZE}件）`);
-
-      // 各バッチを順次処理（バッチ内は並列処理）
-      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-        const batch = batches[batchIndex];
-        console.log(`\nバッチ${batchIndex + 1}/${batches.length}を処理中（${batch.length}件）...`);
-        
-        // バッチ内の各URLに対して独立したpageオブジェクトを作成
-        const batchPromises = batch.map(async (propertyUrl, indexInBatch) => {
-          const globalIndex = batchIndex * BATCH_SIZE + indexInBatch + 1;
-          const batchPage = await context.newPage();
-          
-          try {
-            console.log(`  物件${globalIndex}/${urlsToScrape.length}: ${propertyUrl} にアクセス中...`);
-            const propertyDetail = await scrapePropertyDetail(batchPage, propertyUrl);
-            
-            if (propertyDetail) {
-              console.log(`  物件${globalIndex} 抽出成功: ${propertyDetail.title}`);
-              return propertyDetail;
-            } else {
-              console.log(`  物件${globalIndex} 抽出失敗`);
-              return null;
-            }
-          } catch (error) {
-            console.error(`  物件${globalIndex} のスクレイピングエラー:`, error);
-            return null;
-          } finally {
-            await batchPage.close();
-          }
-        });
-
-        // バッチ内のすべての処理が完了するまで待機
-        const batchResults = await Promise.all(batchPromises);
-        
-        // 成功した物件情報を追加
-        for (const result of batchResults) {
-          if (result) {
-            properties.push(result);
-          }
-        }
-        
-        console.log(`バッチ${batchIndex + 1}完了: ${batchResults.filter(r => r !== null).length}件抽出成功`);
-        
-        // バッチ間で少し待機（サーバー負荷軽減）
-        if (batchIndex < batches.length - 1) {
-          await page.waitForTimeout(500);
-        }
-      }
-
-      console.log('\nすべての物件情報の抽出完了、物件数:', properties.length);
+      // 共通モジュールを使用してスクレイピング実行
+      const properties = await scrapePropertiesFromUrl(searchUrl, page, 50);
 
       // 重複チェック（定期実行の場合のみ、過去14日間の実行履歴と比較）
       let newProperties = properties;
