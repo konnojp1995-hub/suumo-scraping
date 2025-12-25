@@ -98,14 +98,14 @@ function extractProperties(html: string, baseUrl: string): Property[] {
       const detailCol1 = $el.find('.cassetteitem_detail-col1').first();
       if (detailCol1.length > 0) {
         // 所在地は通常、最初のテキストノード
-        address = detailCol1.contents().filter(function() {
+        address = detailCol1.contents().filter(function(this: Node) {
           return this.nodeType === 3; // テキストノード
         }).first().text().trim() || detailCol1.text().split('\n')[0].trim();
       }
       
       // 駅徒歩情報（所在地の後に表示される駅名と徒歩時間）
       let stationWalk = '';
-      const stationInfo = $el.find('.cassetteitem_detail-col1').find('div, a').filter(function() {
+      const stationInfo = $el.find('.cassetteitem_detail-col1').find('div, a').filter(function(this: cheerio.Element) {
         const text = $(this).text();
         return text.includes('駅') || text.includes('歩');
       }).first();
