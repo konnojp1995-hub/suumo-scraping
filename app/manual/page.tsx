@@ -44,6 +44,10 @@ export default function ManualScrapePage() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'サーバーエラーが発生しました' }));
+        // 503エラーの場合は詳細なメッセージを表示
+        if (response.status === 503) {
+          throw new Error(errorData.error || '本番環境ではPlaywrightが使用できないため、スクレイピングはGitHub Actions経由で実行されます。');
+        }
         throw new Error(errorData.error || `HTTPエラー: ${response.status}`);
       }
 

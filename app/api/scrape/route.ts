@@ -302,15 +302,16 @@ export async function POST(request: NextRequest) {
   // 環境変数でスクレイピング実行を制御
   const SCRAPING_EXECUTOR = process.env.SCRAPING_EXECUTOR || 'local'; // 'local' | 'github-actions'
   
-  // GitHub Actionsで実行する設定の場合、定期実行は拒否
+  // GitHub Actionsで実行する設定の場合、すべてのスクレイピング実行を拒否
+  // （Vercel環境ではPlaywrightのブラウザが使用できないため）
   const body = await request.json().catch(() => ({}));
   const executionType: 'manual' | 'scheduled' = body.executionType || 'manual';
   
-  if (SCRAPING_EXECUTOR === 'github-actions' && executionType === 'scheduled') {
+  if (SCRAPING_EXECUTOR === 'github-actions') {
     return NextResponse.json(
       {
         success: false,
-        error: '定期実行のスクレイピングはGitHub Actionsで実行されます。Vercel環境では手動実行のみ利用可能です。',
+        error: 'スクレイピングはGitHub Actionsで実行されます。Vercel環境ではPlaywrightが使用できないため、手動実行もGitHub Actions経由で行ってください。',
       },
       { status: 503 }
     );
