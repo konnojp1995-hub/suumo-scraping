@@ -84,6 +84,10 @@ function extractProperties(html: string, baseUrl: string): Property[] {
       
       console.log(`物件${index + 1} URL抽出成功: ${url}`);
 
+      // SUUMO物件コードをURLから抽出（例: /chintai/jnc_12345678/ → 12345678）
+      const propertyCodeMatch = url.match(/\/(jnc|jc)_(\d+)/);
+      const propertyCode = propertyCodeMatch ? propertyCodeMatch[2] : '';
+
       // SUUMOの物件情報は.cassetteitem_table内のテーブル構造に表示されている
       // 物件情報は建物単位（.cassetteitem）と部屋単位（.cassetteitem_rooms tr）で構成される
       const table = $el.find('.cassetteitem_table').first();
@@ -193,7 +197,7 @@ function extractProperties(html: string, baseUrl: string): Property[] {
         layout,
         area,
         propertyType,
-        age,
+        propertyCode,
         postedDate,
       };
 
@@ -244,6 +248,10 @@ function extractProperties(html: string, baseUrl: string): Property[] {
 
         if (!title || !url) return;
 
+        // SUUMO物件コードをURLから抽出
+        const propertyCodeMatch = url.match(/\/(jnc|jc)_(\d+)/);
+        const propertyCode = propertyCodeMatch ? propertyCodeMatch[2] : '';
+
         // 詳細情報をテキストから抽出
         const detailText = $el.text();
         const rentMatch = detailText.match(/(\d+[,，]\d+|\d+)\s*円/);
@@ -255,11 +263,16 @@ function extractProperties(html: string, baseUrl: string): Property[] {
           url,
           title,
           address: addressMatch ? addressMatch[1] : '',
-          rent: rentMatch ? `${rentMatch[1]}円` : '',
-          area: areaMatch ? `${areaMatch[1]}㎡` : '',
-          layout: layoutMatch ? layoutMatch[1] : '',
-          age: '',
+          stationWalk: '',
           floor: '',
+          rent: rentMatch ? `${rentMatch[1]}円` : '',
+          managementFee: '',
+          deposit: '',
+          keyMoney: '',
+          layout: layoutMatch ? layoutMatch[1] : '',
+          area: areaMatch ? `${areaMatch[1]}㎡` : '',
+          propertyType: '',
+          propertyCode,
           postedDate: '',
         };
 
