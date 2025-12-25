@@ -10,7 +10,7 @@ import {
   saveProperties,
   getScrapingJob,
 } from '@/app/utils/db-operations';
-import { scrapePropertiesFromUrl, scrapePropertyDetail, extractPropertyUrls } from '@/lib/scraping';
+import { scrapePropertiesFromUrl } from '@/lib/scraping';
 
 // 以下の関数は共通モジュール lib/scraping.ts に移動しました
 // 互換性のため、extractProperties関数のみ残します
