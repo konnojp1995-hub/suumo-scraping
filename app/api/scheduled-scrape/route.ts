@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getScheduledJobsByTime, getScrapingJob } from '@/app/utils/db-operations';
+import { 
+  getScheduledJobsByTime, 
+  getScrapingJob,
+  ScrapingJob 
+} from '@/app/utils/db-operations';
 
 // POST: 定期実行用のスクレイピングAPI
 // このAPIはCronから呼び出される

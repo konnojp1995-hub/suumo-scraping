@@ -4,7 +4,7 @@ import { Property } from '@/app/components/PropertyCard';
 // サーバーサイドではadminクライアントを使用、クライアントサイドでは通常のクライアントを使用
 const dbClient = supabaseAdmin || supabase;
 
-interface ScrapingJob {
+export interface ScrapingJob {
   id?: string;
   name: string;
   search_url: string;
@@ -14,7 +14,7 @@ interface ScrapingJob {
   is_active?: boolean;
 }
 
-interface ScrapingExecution {
+export interface ScrapingExecution {
   id?: string;
   job_id: string;
   status: 'running' | 'completed' | 'failed';
