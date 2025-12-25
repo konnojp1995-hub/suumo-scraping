@@ -1,0 +1,17 @@
+{
+    "window.commandCenter": true,
+    "mcpServers": {
+        "supabase": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@supabase/mcp-server-supabase@latest"
+            ],
+            "env": {
+                "SUPABASE_ACCESS_TOKEN": "YOUR_SUPABASE_PERSONAL_ACCESS_TOKEN_HERE"
+            }
+        }
+    }
+}
+
+
