@@ -1,5 +1,5 @@
-import { supabase, supabaseAdmin } from '@/lib/supabase';
-import { Property } from '@/app/components/PropertyCard';
+import { supabase, supabaseAdmin } from '../../lib/supabase';
+import { Property } from '../components/PropertyCard';
 
 // サーバーサイドではadminクライアントを使用、クライアントサイドでは通常のクライアントを使用
 const dbClient = supabaseAdmin || supabase;
@@ -262,6 +262,86 @@ export async function getScrapingExecution(executionId: string) {
   } catch (error) {
     console.error('実行履歴詳細取得処理中のエラー:', error);
     return null;
+  }
+}
+
+/**
+ * 今日の指定時刻に未実行のジョブを取得（キュー管理用）
+ * @param targetTime 対象時刻（'09:15:00' または '22:15:00'）
+ * @returns 未実行のジョブの配列
+ */
+export async function getPendingJobsForTime(targetTime: string) {
+  try {
+    // 現在時刻（JST）を取得
+    const now = new Date();
+    const jstTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+    
+    // 今日の日付を取得（JST）
+    const todayStart = new Date(jstTime);
+    todayStart.setHours(0, 0, 0, 0);
+    
+    const todayEnd = new Date(jstTime);
+    todayEnd.setHours(23, 59, 59, 999);
+    
+    // 対象時刻をDateオブジェクトに変換
+    const [hours, minutes] = targetTime.split(':').map(Number);
+    const targetDateTime = new Date(jstTime);
+    targetDateTime.setHours(hours, minutes, 0, 0);
+    
+    // アクティブな定期実行ジョブを取得（schedule_time1またはschedule_time2が対象時刻）
+    const { data: jobs, error: jobsError } = await dbClient
+      .from('scraping_jobs')
+      .select('*')
+      .eq('job_type', 'scheduled')
+      .eq('is_active', true)
+      .or(`schedule_time1.eq.${targetTime},schedule_time2.eq.${targetTime}`);
+    
+    if (jobsError) {
+      console.error('ジョブ取得エラー:', jobsError);
+      return [];
+    }
+    
+    if (!jobs || jobs.length === 0) {
+      return [];
+    }
+    
+    // 各ジョブについて、今日の対象時刻以降に完了した実行履歴があるか確認
+    const pendingJobs = [];
+    
+    for (const job of jobs) {
+      const { data: executions, error: execError } = await dbClient
+        .from('scraping_executions')
+        .select('id, status, executed_at')
+        .eq('job_id', job.id)
+        .eq('execution_type', 'scheduled')
+        .gte('executed_at', todayStart.toISOString())
+        .lte('executed_at', todayEnd.toISOString())
+        .order('executed_at', { ascending: false })
+        .limit(10);
+      
+      if (execError) {
+        console.error(`ジョブ ${job.id} の実行履歴取得エラー:`, execError);
+        // エラーが発生してもそのジョブは未実行として扱う
+        pendingJobs.push(job);
+        continue;
+      }
+      
+      // 対象時刻以降に完了した実行履歴があるかチェック
+      const hasCompletedExecution = executions?.some((exec: any) => {
+        const execTime = new Date(exec.executed_at);
+        return execTime >= targetDateTime && exec.status === 'completed';
+      });
+      
+      // 未実行または失敗のみの場合、キューに追加
+      if (!hasCompletedExecution) {
+        pendingJobs.push(job);
+      }
+    }
+    
+    return pendingJobs;
+  } catch (error) {
+    console.error('未実行ジョブ取得処理中のエラー:', error);
+    return [];
   }
 }
 

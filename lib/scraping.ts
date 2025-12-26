@@ -4,7 +4,7 @@
  */
 
 import * as cheerio from 'cheerio';
-import { Property } from '@/app/components/PropertyCard';
+import { Property } from '../app/components/PropertyCard';
 
 /**
  * 検索結果ページから物件URLリストを抽出
@@ -352,4 +352,7 @@ export async function scrapePropertiesFromUrl(
   console.log('\nすべての物件情報の抽出完了、物件数:', properties.length);
   return properties;
 }
+
+
+
 

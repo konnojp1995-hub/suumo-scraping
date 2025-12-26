@@ -1,5 +1,5 @@
-import { supabase, supabaseAdmin } from '@/lib/supabase';
-import { Property } from '@/app/components/PropertyCard';
+import { supabase, supabaseAdmin } from '../../lib/supabase';
+import { Property } from '../components/PropertyCard';
 
 /**
  * 重複物件をフィルタリング

@@ -3,9 +3,6 @@
  * キュー方式: 9:15と22:15に統一されたジョブをキューとして管理し、未実行のものを順次実行
  */
 
-// tsconfig-pathsを読み込んでパスエイリアス(@/)を解決
-import 'tsconfig-paths/register';
-
 import { chromium } from 'playwright';
 import { scrapePropertiesFromUrl } from '../lib/scraping';
 import {
