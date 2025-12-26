@@ -1,15 +1,16 @@
 name: Execute Scheduled Scraping Jobs
 
 on:
-  # スケジュール実行（09:15-10:55と22:15-23:55 JSTを5分間隔で実行）
+  # スケジュール実行（09:18-10:33と22:18-23:33 JSTを5分間隔で15回実行）
   # 注意: GitHub ActionsのcronはUTC時刻で指定（JST = UTC + 9時間）
+  # キュー方式: 9:15と22:15に統一されたジョブをキューとして管理し、未実行のものを順次実行
   schedule:
-    # 朝の時間帯（JST 09:15-10:55 = UTC 00:15-01:55）5分ごと
-    - cron: '15,20,25,30,35,40,45,50,55 0 * * *'  # UTC 00:15-00:55 (JST 09:15-09:55)
-    - cron: '0,5,10,15,20,25,30,35,40,45,50,55 1 * * *'  # UTC 01:00-01:55 (JST 10:00-10:55)
-    # 夜の時間帯（JST 22:15-23:55 = UTC 13:15-14:55）5分ごと
-    - cron: '15,20,25,30,35,40,45,50,55 13 * * *'  # UTC 13:15-13:55 (JST 22:15-22:55)
-    - cron: '0,5,10,15,20,25,30,35,40,45,50,55 14 * * *'  # UTC 14:00-14:55 (JST 23:00-23:55)
+    # 朝の時間帯（JST 09:18-10:33 = UTC 00:18-01:33）5分ごと15回
+    - cron: '18,23,28,33,38,43,48,53 0 * * *'  # UTC 00:18-00:53 (JST 09:18-09:53) - 8回
+    - cron: '3,8,13,18,23,28,33 1 * * *'  # UTC 01:03-01:33 (JST 10:03-10:33) - 7回（合計15回）
+    # 夜の時間帯（JST 22:18-23:33 = UTC 13:18-14:33）5分ごと15回
+    - cron: '18,23,28,33,38,43,48,53 13 * * *'  # UTC 13:18-13:53 (JST 22:18-22:53) - 8回
+    - cron: '3,8,13,18,23,28,33 14 * * *'  # UTC 14:03-14:33 (JST 23:03-23:33) - 7回（合計15回）
   
   # 手動実行も可能にする
   workflow_dispatch:
@@ -38,10 +39,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check for pending jobs
+        id: check-jobs
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if npm run check-pending-jobs; then
+            echo "has_jobs=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_jobs=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Install Playwright Browsers
+        if: steps.check-jobs.outputs.has_jobs == 'true'
         run: npx playwright install --with-deps chromium
 
       - name: Execute scraping jobs
+        if: steps.check-jobs.outputs.has_jobs == 'true'
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
