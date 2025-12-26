@@ -1,11 +1,12 @@
 /**
  * GitHub Actionsで定期実行ジョブを実行するスクリプト
+ * キュー方式: 9:15と22:15に統一されたジョブをキューとして管理し、未実行のものを順次実行
  */
 
 import { chromium } from 'playwright';
 import { scrapePropertiesFromUrl } from '../lib/scraping';
 import {
-  getAllScrapingJobs,
+  getPendingJobsForTime,
   createScrapingExecution,
   updateScrapingExecution,
   saveProperties,
@@ -22,29 +23,41 @@ async function executeScheduledJobs() {
     // 現在時刻を取得（JST）
     const now = new Date();
     const jstTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
-    const hours = String(jstTime.getHours()).padStart(2, '0');
-    const minutes = String(jstTime.getMinutes()).padStart(2, '0');
-    const currentTime = `${hours}:${minutes}:00`;
+    const hours = jstTime.getHours();
+    const minutes = jstTime.getMinutes();
+    const currentTime = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
 
     console.log(`=== 定期実行開始: ${currentTime} (JST) ===`);
 
-    // データベースから実行すべきジョブを取得
-    const allJobs = await getAllScrapingJobs();
-    const scheduledJobs = allJobs.filter(
-      (job: any) =>
-        job.job_type === 'scheduled' &&
-        job.is_active === true &&
-        (job.schedule_time1 === currentTime || job.schedule_time2 === currentTime)
-    );
+    // 現在時刻から判断して、どちらのキューをチェックするか決定
+    // 9:18-10:33の間なら9:15のキュー、22:18-23:33の間なら22:15のキュー
+    let targetTime: string | null = null;
+    
+    if ((hours === 9 && minutes >= 18) || (hours === 10 && minutes <= 33)) {
+      targetTime = '09:15:00';
+    } else if ((hours === 22 && minutes >= 18) || (hours === 23 && minutes <= 33)) {
+      targetTime = '22:15:00';
+    }
 
-    console.log(`実行対象ジョブ数: ${scheduledJobs.length}`);
-
-    if (scheduledJobs.length === 0) {
-      console.log('実行すべきジョブがありません');
+    if (!targetTime) {
+      console.log('現在時刻は実行対象時間外です');
       return;
     }
 
-    // Playwrightでブラウザを起動
+    console.log(`対象キュー時刻: ${targetTime}`);
+
+    // 未実行のジョブを取得（Playwrightインストール前にチェック）
+    console.log('未実行ジョブをチェック中...');
+    const pendingJobs = await getPendingJobsForTime(targetTime);
+
+    console.log(`未実行ジョブ数: ${pendingJobs.length}`);
+
+    if (pendingJobs.length === 0) {
+      console.log('実行すべきジョブがありません。処理を終了します。');
+      return;
+    }
+
+    // 未実行のジョブがある場合のみ、Playwrightをインストールしてブラウザを起動
     console.log('ブラウザを起動中...');
     const browser = await chromium.launch({
       headless: true,
@@ -52,8 +65,8 @@ async function executeScheduledJobs() {
     });
 
     try {
-      // 各ジョブを実行
-      for (const job of scheduledJobs) {
+      // 各ジョブを順次実行
+      for (const job of pendingJobs) {
         await executeJob(job, browser);
       }
     } finally {
@@ -84,6 +97,24 @@ async function executeJob(job: any, browser: any) {
   }
 
   console.log(`\nジョブ実行開始: ${job.name} (ID: ${job.id})`);
+  
+  // 検索条件をログに出力
+  console.log(`検索URL: ${job.search_url}`);
+  try {
+    const urlObj = new URL(job.search_url);
+    const params = urlObj.searchParams;
+    console.log(`検索条件:`);
+    console.log(`  - URL: ${job.search_url}`);
+    if (params.get('ta')) console.log(`  - 都道府県コード: ${params.get('ta')}`);
+    if (params.get('sc')) console.log(`  - 市区町村コード: ${params.get('sc')}`);
+    if (params.get('cb')) console.log(`  - 家賃下限: ${params.get('cb')}万円`);
+    if (params.get('ct')) console.log(`  - 家賃上限: ${params.get('ct')}万円`);
+    if (params.get('mb')) console.log(`  - 面積下限: ${params.get('mb')}㎡`);
+    if (params.get('mt')) console.log(`  - 面積上限: ${params.get('mt')}㎡`);
+    if (params.get('ts')) console.log(`  - 建物種類: ${params.get('ts')}`);
+  } catch (error) {
+    console.log(`検索URL解析エラー: ${error}`);
+  }
 
   try {
     // コンテキストとページを作成
@@ -94,6 +125,7 @@ async function executeJob(job: any, browser: any) {
 
     try {
       // スクレイピング実行
+      console.log(`スクレイピングを開始します: ${job.search_url}`);
       const properties = await scrapePropertiesFromUrl(job.search_url, page, 50);
 
       // 重複チェック（過去14日間の定期実行を対象）
@@ -153,4 +185,5 @@ async function executeJob(job: any, browser: any) {
 
 // スクリプト実行
 executeScheduledJobs();
+
 
