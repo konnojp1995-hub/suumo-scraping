@@ -3,6 +3,9 @@
  * Playwright install前に実行して、ジョブがなければ処理を終了
  */
 
+// tsconfig-pathsを読み込んでパスエイリアス(@/)を解決
+import 'tsconfig-paths/register';
+
 import {
   getPendingJobsForTime,
 } from '../app/utils/db-operations';
