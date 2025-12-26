@@ -8,8 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "execute-scheduled-jobs": "tsx scripts/execute-scheduled-jobs.ts",
-    "check-pending-jobs": "tsx scripts/check-pending-jobs.ts"
+    "execute-scheduled-jobs": "tsx --tsconfig scripts/tsconfig.json scripts/execute-scheduled-jobs.ts",
+    "check-pending-jobs": "tsx --tsconfig scripts/tsconfig.json scripts/check-pending-jobs.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
