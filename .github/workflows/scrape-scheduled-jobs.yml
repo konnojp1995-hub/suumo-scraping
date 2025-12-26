@@ -1,0 +1,68 @@
+name: Execute Scheduled Scraping Jobs
+
+on:
+  # スケジュール実行（09:18-10:33と22:18-23:33 JSTを5分間隔で15回実行）
+  # 注意: GitHub ActionsのcronはUTC時刻で指定（JST = UTC + 9時間）
+  # キュー方式: 9:15と22:15に統一されたジョブをキューとして管理し、未実行のものを順次実行
+  schedule:
+    # 朝の時間帯（JST 09:18-10:33 = UTC 00:18-01:33）5分ごと15回
+    - cron: '18,23,28,33,38,43,48,53 0 * * *'  # UTC 00:18-00:53 (JST 09:18-09:53) - 8回
+    - cron: '3,8,13,18,23,28,33 1 * * *'  # UTC 01:03-01:33 (JST 10:03-10:33) - 7回（合計15回）
+    # 夜の時間帯（JST 22:18-23:33 = UTC 13:18-14:33）5分ごと15回
+    - cron: '18,23,28,33,38,43,48,53 13 * * *'  # UTC 13:18-13:53 (JST 22:18-22:53) - 8回
+    - cron: '3,8,13,18,23,28,33 14 * * *'  # UTC 14:03-14:33 (JST 23:03-23:33) - 7回（合計15回）
+  
+  # 手動実行も可能にする
+  workflow_dispatch:
+    inputs:
+      time:
+        description: '実行時刻 (HH:MM:SS形式、例: 09:15:00) - 現在時刻のジョブを実行する場合は空欄'
+        required: false
+        type: string
+
+jobs:
+  execute-scraping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15  # タイムアウト設定（最大15分）
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check for pending jobs
+        id: check-jobs
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if npm run check-pending-jobs; then
+            echo "has_jobs=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_jobs=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Playwright Browsers
+        if: steps.check-jobs.outputs.has_jobs == 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Execute scraping jobs
+        if: steps.check-jobs.outputs.has_jobs == 'true'
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          NEXT_PUBLIC_BASE_URL: ${{ secrets.NEXT_PUBLIC_BASE_URL }}
+        run: npm run execute-scheduled-jobs
