@@ -30,12 +30,20 @@ async function executeScheduledJobs() {
     console.log(`=== 定期実行開始: ${currentTime} (JST) ===`);
 
     // 現在時刻から判断して、どちらのキューをチェックするか決定
-    // 9:18-10:33の間なら9:15のキュー、22:18-23:33の間なら22:15のキュー
+    // 朝のキュー（09:15:00）: 09:18-12:00の間、または10:34-12:00で遅延実行の場合
+    // 夜のキュー（22:15:00）: 22:18-23:59の間、または23:34-翌01:00で遅延実行の場合
     let targetTime: string | null = null;
     
-    if ((hours === 9 && minutes >= 18) || (hours === 10 && minutes <= 33)) {
+    // 朝のキュー（09:15:00）の対象時間
+    if ((hours === 9 && minutes >= 18) || (hours === 10) || (hours === 11)) {
       targetTime = '09:15:00';
-    } else if ((hours === 22 && minutes >= 18) || (hours === 23 && minutes <= 33)) {
+    }
+    // 夜のキュー（22:15:00）の対象時間
+    else if ((hours === 22 && minutes >= 18) || hours === 23) {
+      targetTime = '22:15:00';
+    }
+    // 翌日の0時台も夜のキューの遅延実行として扱う
+    else if (hours === 0) {
       targetTime = '22:15:00';
     }
 

@@ -288,6 +288,14 @@ export async function getPendingJobsForTime(targetTime: string) {
     const targetDateTime = new Date(jstTime);
     targetDateTime.setHours(hours, minutes, 0, 0);
     
+    // 0時台で夜のキュー（22:15:00）をチェックする場合、前日の22:15:00として扱う
+    if (jstTime.getHours() === 0 && targetTime === '22:15:00') {
+      targetDateTime.setDate(targetDateTime.getDate() - 1);
+      // 今日の範囲も前日に変更
+      todayStart.setDate(todayStart.getDate() - 1);
+      todayEnd.setDate(todayEnd.getDate() - 1);
+    }
+    
     // アクティブな定期実行ジョブを取得（schedule_time1またはschedule_time2が対象時刻）
     const { data: jobs, error: jobsError } = await dbClient
       .from('scraping_jobs')
