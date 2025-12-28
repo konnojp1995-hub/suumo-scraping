@@ -62,6 +62,7 @@ async function executeScheduledJobs() {
 
     if (pendingJobs.length === 0) {
       console.log('実行すべきジョブがありません。処理を終了します。');
+      console.log('LINE通知は送信されません。');
       return;
     }
 
@@ -160,22 +161,26 @@ async function executeJob(job: any, browser: any) {
         new_properties: newProperties.length,
       });
 
-      // LINE通知を送信
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://your-domain.vercel.app';
-      const resultUrl = `${baseUrl}/results/${executionId}`;
-      const searchConditions = `ジョブ名: ${job.name}\n検索URL: ${job.search_url}\n\n詳細: ${resultUrl}`;
-      
-      await sendLineNotificationWithCSV(searchConditions, '', newProperties.length)
-        .then(success => {
-          if (success) {
-            console.log('LINE通知を送信しました');
-          } else {
-            console.warn('LINE通知の送信に失敗しました');
-          }
-        })
-        .catch(error => {
-          console.error('LINE通知の送信に失敗しました:', error);
-        });
+      // LINE通知を送信（新規物件が1件以上ある場合のみ）
+      if (newProperties.length > 0) {
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://your-domain.vercel.app';
+        const resultUrl = `${baseUrl}/results/${executionId}`;
+        const searchConditions = `ジョブ名: ${job.name}\n検索URL: ${job.search_url}\n\n詳細: ${resultUrl}`;
+        
+        await sendLineNotificationWithCSV(searchConditions, '', newProperties.length)
+          .then(success => {
+            if (success) {
+              console.log('LINE通知を送信しました');
+            } else {
+              console.warn('LINE通知の送信に失敗しました');
+            }
+          })
+          .catch(error => {
+            console.error('LINE通知の送信に失敗しました:', error);
+          });
+      } else {
+        console.log('新規物件が0件のため、LINE通知をスキップしました');
+      }
 
       console.log(`ジョブ実行完了: ${job.name}`);
     } finally {
