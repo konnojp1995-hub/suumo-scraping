@@ -27,11 +27,8 @@ export async function filterDuplicateProperties(
     // Supabaseクライアント（admin権限が必要な場合はsupabaseAdminを使用）
     const client = supabaseAdmin || supabase;
 
-    // 既存の物件コードを取得
-    let query = client
-      .from('properties')
-      .select('property_code')
-      .in('property_code', propertyCodes);
+    // 既存の物件コードを取得（propertyCodesが大きい場合はバッチ処理）
+    const PROPERTY_CODE_BATCH_SIZE = 100;
 
     // 過去N日間をチェックする場合（定期実行の場合）
     if (daysToCheck && daysToCheck > 0) {
@@ -40,6 +37,7 @@ export async function filterDuplicateProperties(
       
       if (checkAllScheduledJobs) {
         // すべての定期実行ジョブの過去N日間の実行履歴を取得
+        // ヘッダーオーバーフローを防ぐため、execution_idのバッチ処理を使用
         const { data: executions, error: execError } = await client
           .from('scraping_executions')
           .select('id')
@@ -51,8 +49,44 @@ export async function filterDuplicateProperties(
           // エラーの場合は全件チェックにフォールバック
         } else if (executions && executions.length > 0) {
           const executionIds = executions.map(e => e.id);
-          query = query.in('execution_id', executionIds);
           console.log(`過去${daysToCheck}日間の定期実行履歴: ${executions.length}件`);
+          
+          // ヘッダーオーバーフローを防ぐため、execution_idをバッチ処理
+          const BATCH_SIZE = 100;
+          const existingCodeSet = new Set<string>();
+          
+          // バッチごとに処理
+          for (let i = 0; i < executionIds.length; i += BATCH_SIZE) {
+            const batch = executionIds.slice(i, i + BATCH_SIZE);
+            
+            try {
+              const { data: batchCodes, error: batchError } = await client
+                .from('properties')
+                .select('property_code')
+                .in('property_code', propertyCodes)
+                .in('execution_id', batch);
+              
+              if (batchError) {
+                console.error(`重複チェックエラー（バッチ${Math.floor(i / BATCH_SIZE) + 1}）:`, batchError);
+                // エラーが発生しても続行
+              } else if (batchCodes) {
+                batchCodes.forEach((p: any) => existingCodeSet.add(p.property_code));
+              }
+            } catch (batchError) {
+              console.error(`重複チェック処理中のエラー（バッチ${Math.floor(i / BATCH_SIZE) + 1}）:`, batchError);
+              // エラーが発生しても続行
+            }
+          }
+          
+          // 重複を除外
+          const newProperties = properties.filter(
+            p => !p.propertyCode || !existingCodeSet.has(p.propertyCode)
+          );
+          
+          return {
+            newProperties,
+            duplicateCount: properties.length - newProperties.length,
+          };
         } else {
           // 実行履歴がない場合は全て新規として扱う
           console.log(`過去${daysToCheck}日間の定期実行履歴がありません`);
@@ -71,8 +105,44 @@ export async function filterDuplicateProperties(
           // エラーの場合は全件チェックにフォールバック
         } else if (executions && executions.length > 0) {
           const executionIds = executions.map(e => e.id);
-          query = query.in('execution_id', executionIds);
           console.log(`ジョブID=${jobId}の過去${daysToCheck}日間の実行履歴: ${executions.length}件`);
+          
+          // ヘッダーオーバーフローを防ぐため、execution_idをバッチ処理
+          const BATCH_SIZE = 100;
+          const existingCodeSet = new Set<string>();
+          
+          // バッチごとに処理
+          for (let i = 0; i < executionIds.length; i += BATCH_SIZE) {
+            const batch = executionIds.slice(i, i + BATCH_SIZE);
+            
+            try {
+              const { data: batchCodes, error: batchError } = await client
+                .from('properties')
+                .select('property_code')
+                .in('property_code', propertyCodes)
+                .in('execution_id', batch);
+              
+              if (batchError) {
+                console.error(`重複チェックエラー（バッチ${Math.floor(i / BATCH_SIZE) + 1}）:`, batchError);
+                // エラーが発生しても続行
+              } else if (batchCodes) {
+                batchCodes.forEach((p: any) => existingCodeSet.add(p.property_code));
+              }
+            } catch (batchError) {
+              console.error(`重複チェック処理中のエラー（バッチ${Math.floor(i / BATCH_SIZE) + 1}）:`, batchError);
+              // エラーが発生しても続行
+            }
+          }
+          
+          // 重複を除外
+          const newProperties = properties.filter(
+            p => !p.propertyCode || !existingCodeSet.has(p.propertyCode)
+          );
+          
+          return {
+            newProperties,
+            duplicateCount: properties.length - newProperties.length,
+          };
         } else {
           // 実行履歴がない場合は全て新規として扱う
           console.log(`ジョブID=${jobId}の過去${daysToCheck}日間の実行履歴がありません`);
@@ -91,24 +161,73 @@ export async function filterDuplicateProperties(
         // エラーの場合は全件チェックにフォールバック
       } else if (executions && executions.length > 0) {
         const executionIds = executions.map(e => e.id);
-        query = query.in('execution_id', executionIds);
+        
+        // ヘッダーオーバーフローを防ぐため、execution_idをバッチ処理
+        const BATCH_SIZE = 100;
+        const existingCodeSet = new Set<string>();
+        
+        // バッチごとに処理
+        for (let i = 0; i < executionIds.length; i += BATCH_SIZE) {
+          const batch = executionIds.slice(i, i + BATCH_SIZE);
+          
+          try {
+            const { data: batchCodes, error: batchError } = await client
+              .from('properties')
+              .select('property_code')
+              .in('property_code', propertyCodes)
+              .in('execution_id', batch);
+            
+            if (batchError) {
+              console.error(`重複チェックエラー（バッチ${Math.floor(i / BATCH_SIZE) + 1}）:`, batchError);
+              // エラーが発生しても続行
+            } else if (batchCodes) {
+              batchCodes.forEach((p: any) => existingCodeSet.add(p.property_code));
+            }
+          } catch (batchError) {
+            console.error(`重複チェック処理中のエラー（バッチ${Math.floor(i / BATCH_SIZE) + 1}）:`, batchError);
+            // エラーが発生しても続行
+          }
+        }
+        
+        // 重複を除外
+        const newProperties = properties.filter(
+          p => !p.propertyCode || !existingCodeSet.has(p.propertyCode)
+        );
+        
+        return {
+          newProperties,
+          duplicateCount: properties.length - newProperties.length,
+        };
       } else {
         // 実行履歴がない場合は全て新規として扱う
         return { newProperties: properties, duplicateCount: 0 };
       }
     }
 
-    const { data: existingCodes, error } = await query;
-
-    if (error) {
-      console.error('重複チェックエラー:', error);
-      // エラーの場合は全て新規として扱う（データベース接続エラー等）
-      return { newProperties: properties, duplicateCount: 0 };
+    // execution_idのフィルタリングがない場合（全件チェック）
+    // propertyCodesが大きい場合はバッチ処理
+    const existingCodeSet = new Set<string>();
+    
+    for (let i = 0; i < propertyCodes.length; i += PROPERTY_CODE_BATCH_SIZE) {
+      const batch = propertyCodes.slice(i, i + PROPERTY_CODE_BATCH_SIZE);
+      
+      try {
+        const { data: batchCodes, error: batchError } = await client
+          .from('properties')
+          .select('property_code')
+          .in('property_code', batch);
+        
+        if (batchError) {
+          console.error(`重複チェックエラー（property_codeバッチ${Math.floor(i / PROPERTY_CODE_BATCH_SIZE) + 1}）:`, batchError);
+          // エラーが発生しても続行
+        } else if (batchCodes) {
+          batchCodes.forEach((p: any) => existingCodeSet.add(p.property_code));
+        }
+      } catch (batchError) {
+        console.error(`重複チェック処理中のエラー（property_codeバッチ${Math.floor(i / PROPERTY_CODE_BATCH_SIZE) + 1}）:`, batchError);
+        // エラーが発生しても続行
+      }
     }
-
-    const existingCodeSet = new Set(
-      existingCodes?.map(p => p.property_code) || []
-    );
 
     const newProperties = properties.filter(
       p => !p.propertyCode || !existingCodeSet.has(p.propertyCode)

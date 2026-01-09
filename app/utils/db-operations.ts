@@ -158,6 +158,7 @@ export async function updateScrapingExecution(
 
 /**
  * 物件情報を一括保存
+ * 重複キーエラーを適切に処理し、既存の物件はスキップする
  */
 export async function saveProperties(
   executionId: string,
@@ -168,7 +169,46 @@ export async function saveProperties(
   }
 
   try {
-    const propertyData = properties.map(prop => ({
+    // まず、既存のproperty_codeをチェックして重複を除外
+    const propertyCodes = properties
+      .map(prop => prop.propertyCode)
+      .filter((code): code is string => !!code && code.trim() !== '');
+
+    if (propertyCodes.length === 0) {
+      console.log('有効なproperty_codeがありません');
+      return 0;
+    }
+
+    // 既存のproperty_codeを取得（バッチ処理でヘッダーオーバーフローを防ぐ）
+    const existingCodes = new Set<string>();
+    const BATCH_SIZE = 100; // 一度に100件ずつチェック
+
+    for (let i = 0; i < propertyCodes.length; i += BATCH_SIZE) {
+      const batch = propertyCodes.slice(i, i + BATCH_SIZE);
+      const { data, error } = await dbClient
+        .from('properties')
+        .select('property_code')
+        .in('property_code', batch);
+
+      if (error) {
+        console.error(`既存コード取得エラー（バッチ${Math.floor(i / BATCH_SIZE) + 1}）:`, error);
+        // エラーが発生しても続行（重複チェックをスキップ）
+      } else if (data) {
+        data.forEach((p: any) => existingCodes.add(p.property_code));
+      }
+    }
+
+    // 重複を除外した物件のみを保存
+    const newProperties = properties.filter(
+      prop => !prop.propertyCode || !existingCodes.has(prop.propertyCode)
+    );
+
+    if (newProperties.length === 0) {
+      console.log('すべての物件が既に存在するため、保存をスキップします');
+      return 0;
+    }
+
+    const propertyData = newProperties.map(prop => ({
       execution_id: executionId,
       property_code: prop.propertyCode || '',
       url: prop.url,
@@ -187,18 +227,55 @@ export async function saveProperties(
     }));
 
     // バッチで挿入（Supabaseは一度に大量のデータを挿入できる）
-    const { error } = await dbClient
-      .from('properties')
-      .insert(propertyData);
+    // ただし、重複キーエラーが発生した場合は個別に処理
+    let savedCount = 0;
+    const INSERT_BATCH_SIZE = 50; // 挿入もバッチ処理で行う
 
-    if (error) {
-      console.error('物件情報保存エラー:', error);
-      // ユニーク制約違反（重複）の場合は一部が保存されている可能性がある
-      // エラーを無視して続行するか、エラーを返すかは要件による
-      throw error;
+    for (let i = 0; i < propertyData.length; i += INSERT_BATCH_SIZE) {
+      const batch = propertyData.slice(i, i + INSERT_BATCH_SIZE);
+      
+      try {
+        const { error } = await dbClient
+          .from('properties')
+          .insert(batch);
+
+        if (error) {
+          // 重複キーエラーの場合、個別に挿入を試みる
+          if (error.code === '23505') {
+            console.log(`バッチ${Math.floor(i / INSERT_BATCH_SIZE) + 1}で重複キーエラーが発生。個別に処理します。`);
+            
+            // 個別に挿入（重複はスキップ）
+            for (const item of batch) {
+              try {
+                const { error: singleError } = await dbClient
+                  .from('properties')
+                  .insert(item);
+                
+                if (!singleError) {
+                  savedCount++;
+                } else if (singleError.code !== '23505') {
+                  // 重複キー以外のエラーはログに記録
+                  console.error('物件保存エラー:', singleError);
+                }
+              } catch (singleError) {
+                // 個別エラーは無視して続行
+                console.error('物件保存処理中のエラー:', singleError);
+              }
+            }
+          } else {
+            throw error;
+          }
+        } else {
+          savedCount += batch.length;
+        }
+      } catch (batchError) {
+        console.error(`バッチ${Math.floor(i / INSERT_BATCH_SIZE) + 1}の保存エラー:`, batchError);
+        // エラーが発生しても続行
+      }
     }
 
-    return properties.length;
+    console.log(`${savedCount}件の物件情報を保存しました（${properties.length}件中、重複${properties.length - newProperties.length}件、新規${newProperties.length}件）`);
+    return savedCount;
   } catch (error) {
     console.error('物件情報保存処理中のエラー:', error);
     throw error;
